@@ -1,0 +1,53 @@
+/*
+* // 
+* // transfers.dart
+* // company name
+* // 
+* // Created by Ivan Bilchenko on 2024-03-26
+* // Copyright (c) 2024 company name. All rights reserved.
+* // 
+*/
+
+import 'package:collection/collection.dart';
+import 'package:company_name_business/src/models/plain/affiliate/overview/chargebacks.dart';
+import 'package:company_name_business/src/models/plain/affiliate/overview/payments.dart';
+import 'package:company_name_business/src/models/plain/affiliate/overview/refunds.dart';
+import 'package:company_name_core/models/mapper.dart';
+import 'package:equatable/equatable.dart';
+import 'package:meta/meta.dart';
+
+@immutable
+class Transfers extends Equatable {
+  const Transfers({required this.payments, required this.chargebacks, required this.refunds});
+
+  final Payments payments;
+  final Chargebacks chargebacks;
+  final Refunds refunds;
+
+  double get totalProfileFee => [payments.profileFee, chargebacks.profileFee, refunds.profileFee].sum;
+
+  @override
+  List<Object?> get props => [payments, chargebacks, refunds];
+}
+
+@immutable
+class TransfersMapper extends ModelMapper<Transfers> {
+  const TransfersMapper({
+    final PaymentsMapper paymentsMapper = const PaymentsMapper(),
+    final ChargebacksMapper chargebacksMapper = const ChargebacksMapper(),
+    final RefundsMapper refundsMapper = const RefundsMapper(),
+  })  : _paymentsMapper = paymentsMapper,
+        _chargebacksMapper = chargebacksMapper,
+        _refundsMapper = refundsMapper;
+
+  final PaymentsMapper _paymentsMapper;
+  final ChargebacksMapper _chargebacksMapper;
+  final RefundsMapper _refundsMapper;
+
+  @override
+  Transfers fromMap(final Map<String, dynamic> map) => Transfers(
+        payments: _paymentsMapper.fromMap(map['payments']),
+        chargebacks: _chargebacksMapper.fromMap(map['chargebacks']),
+        refunds: _refundsMapper.fromMap(map['refunds']),
+      );
+}
