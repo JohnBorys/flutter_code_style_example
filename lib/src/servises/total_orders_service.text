@@ -1,0 +1,47 @@
+/*
+* // 
+* // statistic_payouts_overview_service.dart
+* // company name
+* // 
+* // Created by Ivan Bilchenko on 2024-03-14
+* // Copyright (c) 2024 company name. All rights reserved.
+* // 
+*/
+
+import 'package:company_name_business/src/models/plain/filters/affiliate_statistics_overview_filter.dart';
+import 'package:company_name_business/src/models/plain/filters/filters.dart';
+import 'package:company_name_business/src/repositories/affiliate/statistics_overview/statistic_payouts_repository.dart';
+import 'package:company_name_core/utils/disposable.dart';
+
+abstract interface class StatisticPayoutsOverviewService implements Disposable {
+  Future<StatisticPayoutsResult> fetch();
+
+  /// Updates the filter for [AffiliateStatisticsOverview].
+  /// Returns true if the filter is successfully updated, overwise false.
+  bool setFilter(final AffiliateStatisticsOverviewFilter filter);
+}
+
+class StatisticPayoutsOverviewServiceImpl implements StatisticPayoutsOverviewService {
+  StatisticPayoutsOverviewServiceImpl({
+    required final StatisticPayoutsRepository repository,
+    final AffiliateStatisticsOverviewFilter defaultFilter = AffiliateStatisticsOverviewFilter.defaultFilter,
+  })  : _repository = repository,
+        _filter = defaultFilter;
+
+  Filter _filter;
+  final StatisticPayoutsRepository _repository;
+
+  @override
+  Future<StatisticPayoutsResult> fetch() => _repository.fetch(filter: _filter);
+
+  @override
+  bool setFilter(final AffiliateStatisticsOverviewFilter filter) {
+    if (_filter == filter) return false;
+
+    _filter = filter;
+    return true;
+  }
+
+  @override
+  void dispose() => _repository.dispose();
+}

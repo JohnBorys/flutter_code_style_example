@@ -1,0 +1,241 @@
+/*
+* // 
+* // publisher_payouts_statistics_bloc.dart
+* // company name
+* // 
+* // Created by Ivan Bilchenko on 2024-03-15
+* // Copyright (c) 2024 company name. All rights reserved.
+* // 
+*/
+
+import 'package:company_name_business/src/models/plain/affiliate/overview/schedule_payouts.dart';
+import 'package:company_name_business/src/models/plain/affiliate/overview/statistic_payouts.dart';
+import 'package:company_name_business/src/models/plain/currency.dart';
+import 'package:company_name_business/src/models/plain/filters/affiliate_statistics_overview_filter.dart';
+import 'package:company_name_business/src/models/plain/filters/publisher_transfers_statistics_filter.dart';
+import 'package:company_name_business/src/repositories/affiliate/statistics_overview/scheduled_payouts_repository.dart';
+import 'package:company_name_business/src/repositories/affiliate/statistics_overview/statistic_payouts_repository.dart';
+import 'package:company_name_business/src/repositories/affiliate/statistics_overview/total_orders_repository.dart';
+import 'package:company_name_business/src/repositories/affiliate/statistics_overview/total_transfers_repository.dart';
+import 'package:company_name_business/src/services/affiliate/statistics_overview/scheduled_payouts_overview_service.dart';
+import 'package:company_name_business/src/services/affiliate/statistics_overview/statistic_payouts_overview_service.dart';
+import 'package:company_name_business/src/services/affiliate/statistics_overview/total_orders_service.dart';
+import 'package:company_name_business/src/services/affiliate/statistics_overview/total_transfers_service.dart';
+import 'package:company_name_core/extensions/list.dart';
+import 'package:company_name_core/services/connectivity/connectivity.dart';
+import 'package:company_name_core/utils/disposable.dart';
+import 'package:company_name_shared_kit/models/results/connectivity.dart';
+import 'package:company_name_shared_kit/util/publish_subject.dart';
+import 'package:company_name_uikit/base/bloc.dart';
+import 'package:equatable/equatable.dart';
+import 'package:meta/meta.dart';
+import 'package:result/result.dart';
+
+@immutable
+class PublisherPayoutsStatisticsState extends Equatable {
+  const PublisherPayoutsStatisticsState({
+    required this.statistics,
+    required this.schedules,
+    required this.totalOrders,
+    required this.totalTransfers,
+    required this.hasNetworkConnection,
+    required this.hasException,
+    required this.isFetching,
+    this.currency = const Currency.eur(),
+  });
+
+  const PublisherPayoutsStatisticsState.initial()
+      : this(
+          statistics: StatisticPayouts.defaultStatistic,
+          schedules: const [],
+          totalOrders: 0,
+          totalTransfers: 0,
+          hasNetworkConnection: true,
+          hasException: false,
+          isFetching: true,
+        );
+
+  PublisherPayoutsStatisticsState copyWith({
+    final StatisticPayouts? statistics,
+    final List<ScheduledPayouts>? schedules,
+    final int? totalOrders,
+    final int? totalTransfers,
+    final bool? hasNetworkConnection,
+    final bool? hasException,
+    final bool? isFetching,
+    final Currency? currency,
+  }) =>
+      PublisherPayoutsStatisticsState(
+        statistics: statistics ?? this.statistics,
+        schedules: schedules ?? this.schedules,
+        totalOrders: totalOrders ?? this.totalOrders,
+        totalTransfers: totalTransfers ?? this.totalTransfers,
+        hasNetworkConnection: hasNetworkConnection ?? this.hasNetworkConnection,
+        hasException: hasException ?? this.hasException,
+        isFetching: isFetching ?? this.hasException,
+        currency: currency ?? this.currency,
+      );
+
+  final StatisticPayouts statistics;
+  final List<ScheduledPayouts> schedules;
+  final int totalOrders;
+  final int totalTransfers;
+  final bool hasNetworkConnection;
+  final bool hasException;
+  final bool isFetching;
+  final Currency currency;
+
+  double get totalCommission => statistics.allTransfers?.totalProfileFee ?? 0;
+  double get payOutNet =>
+      statistics.payoutedPayments?.transfers.totalProfileFee ?? 0;
+  double get upcomingPayout =>
+      schedules.safeAtIndex(0)?.transfers?.totalProfileFee ?? 0;
+  double get subsequentPayout =>
+      schedules.safeAtIndex(1)?.transfers?.totalProfileFee ?? 0;
+
+  @override
+  List<Object?> get props => [
+        statistics,
+        schedules,
+        totalOrders,
+        totalTransfers,
+        hasNetworkConnection,
+        hasException,
+        isFetching,
+        currency,
+      ];
+}
+
+abstract interface class PublisherPayoutsStatisticsBloc
+    implements Bloc<PublisherPayoutsStatisticsState> {
+  Future<Result> fetch();
+  Future<void> applyFilter(final AffiliateStatisticsOverviewFilter filter);
+}
+
+final class PublisherPayoutsStatisticsBlocImpl
+    with DisposableOwner
+    implements PublisherPayoutsStatisticsBloc {
+  PublisherPayoutsStatisticsBlocImpl({
+    required final StatisticPayoutsOverviewService statisticOverviewService,
+    required final ScheduledPayoutsOverviewService scheduleOverviewService,
+    required final TotalOrdersService totalOrdersService,
+    required final TotalTransfersService totalTransfersService,
+    required final ConnectivityService connectivityService,
+  })  : _statisticService = statisticOverviewService,
+        _scheduleService = scheduleOverviewService,
+        _totalOrdersService = totalOrdersService,
+        _totalTransfersService = totalTransfersService,
+        _connectivityService = connectivityService;
+
+  final StatisticPayoutsOverviewService _statisticService;
+  final ScheduledPayoutsOverviewService _scheduleService;
+  final TotalOrdersService _totalOrdersService;
+  final TotalTransfersService _totalTransfersService;
+  final ConnectivityService _connectivityService;
+
+  final _publisher = PublishSubject<PublisherPayoutsStatisticsState>();
+  var _currentState = const PublisherPayoutsStatisticsState.initial();
+
+  bool get hasInternet => _connectivityService.hasInternet;
+
+  @override
+  PublisherPayoutsStatisticsState get initialState =>
+      const PublisherPayoutsStatisticsState.initial();
+
+  @override
+  Stream<PublisherPayoutsStatisticsState> get state => _publisher.stream;
+
+  @override
+  Future<Result> fetch() async {
+    if (!hasInternet) {
+      _publisher.add(_currentState.copyWith(hasNetworkConnection: false));
+      return LocalizedConnectivityStatus.disconnected();
+    }
+
+    _publisher.add(_buildWaitingState());
+
+    final futures = <Future<Result>>[
+      _statisticService.fetch(),
+      _scheduleService.fetch(),
+      _totalOrdersService.fetch(),
+      _totalTransfersService.fetch(),
+    ];
+
+    final [
+      StatisticPayoutsResult statisticsResult,
+      ScheduledPayoutsResult scheduleResult,
+      TotalOrdersResult totalOrdersResult,
+      TotalTransfersResult totalTransfersResult,
+    ] = await Future.wait<dynamic>(futures);
+
+    final state = _buildState(
+      statistics: statisticsResult.valueOrNull,
+      schedules: scheduleResult.valueOrNull,
+      totalOrders: totalOrdersResult.valueOrNull?.count,
+      totalTransfers: totalTransfersResult.valueOrNull?.count,
+    );
+
+    _publisher.add(state);
+
+    final results = [
+      statisticsResult,
+      scheduleResult,
+      totalOrdersResult,
+      totalTransfersResult
+    ];
+
+    return results.firstWhere((result) => result.hasException,
+        orElse: () => const Result.empty());
+  }
+
+  @override
+  Future<void> applyFilter(
+      final AffiliateStatisticsOverviewFilter filter) async {
+    _publisher.add(_buildState(currency: filter.currency));
+    final transfersFilter = PublisherTransfersStatisticsFilter.defaultFilter
+        .copyWith(currency: filter.currency);
+
+    final isUpdated = _statisticService.setFilter(filter) &&
+        _scheduleService.setFilter(filter) &&
+        _totalOrdersService.setFilter(filter) &&
+        _totalTransfersService.setFilter(transfersFilter);
+
+    if (isUpdated) fetch();
+  }
+
+  @override
+  void dispose() {
+    _statisticService.dispose();
+    _scheduleService.dispose();
+    _totalOrdersService.dispose();
+    _totalTransfersService.dispose();
+    _publisher.close();
+  }
+
+  PublisherPayoutsStatisticsState _buildWaitingState() => _buildState(
+      isFetching: true, hasException: false, hasNetworkConnection: true);
+
+  PublisherPayoutsStatisticsState _buildState({
+    final StatisticPayouts? statistics,
+    final List<ScheduledPayouts>? schedules,
+    final int? totalOrders,
+    final int? totalTransfers,
+    final bool isFetching = false,
+    final bool? hasException,
+    final bool? hasNetworkConnection,
+    final Currency? currency,
+  }) {
+    _currentState = _currentState.copyWith(
+      statistics: statistics,
+      schedules: schedules,
+      totalOrders: totalOrders,
+      totalTransfers: totalTransfers,
+      isFetching: isFetching,
+      hasException: hasException,
+      hasNetworkConnection: hasNetworkConnection,
+      currency: currency,
+    );
+
+    return _currentState;
+  }
+}

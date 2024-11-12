@@ -1,0 +1,97 @@
+/*
+* // 
+* // total_transfers_repository_test.dart
+* // company name
+* // 
+* // Created by Ivan Bilchenko on 2024-04-01
+* // Copyright (c) 2024 company name. All rights reserved.
+* // 
+*/
+
+import 'dart:io';
+import 'package:company_name_business/src/models/plain/affiliate/overview/total_count.dart';
+import 'package:company_name_business/src/models/plain/filters/affiliate_statistics_overview_filter.dart';
+import 'package:company_name_business/src/repositories/affiliate/statistics_overview/total_transfers_repository.dart';
+import 'package:company_name_business/src/repositories/request_repository.dart';
+import 'package:company_name_core/repositories/repository.dart';
+import 'package:http/http.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:result/result.dart';
+import 'package:test/test.dart';
+
+import '../../../../utils/logic_mocks.dart';
+import '../../../../utils/model_mocks.dart';
+
+void main() {
+  const filter = AffiliateStatisticsOverviewFilter.defaultFilter;
+  const isResultException = TypeMatcher<ResultException>();
+  const exception = 'exception';
+
+  final totalCount = ModelMocks.totalCount();
+  final successResponse = Response('{"success": true}', HttpStatus.ok);
+  final failureResponse = Response('{"success": false}', HttpStatus.badRequest);
+  final errorResponse = Response('{"error": " "}', HttpStatus.ok);
+
+  late final DefaultIOClient client;
+  late final RequestRepositoryConfigurator configurator;
+  late final TotalCountMapper mapper;
+  late final TotalTransfersRepository repository;
+
+  setUpAll(() {
+    registerFallbackValue(Uri());
+
+    client = ClientMock();
+    mapper = TotalMapperMock();
+    configurator = RequestRepositoryConfiguratorMock();
+
+    repository = TotalTransfersRepositoryImpl(
+      client: client,
+      userDetails: CurrentUserDetailsMock(),
+      configurator: configurator,
+      totalMapper: mapper,
+    );
+
+    when(() => configurator.baseApiPath).thenReturn('path');
+    when(() => configurator.baseWebPath).thenReturn('path');
+  });
+
+  group('fetch', () {
+    test('success', () async {
+      when(() => mapper.fromMap(any())).thenReturn(totalCount);
+      when(() => client.get(any())).thenAnswer((_) async => successResponse);
+
+      final result = await repository.fetch(filter: filter);
+
+      expect(result.hasException, isFalse);
+      expect(result.hasValue, isTrue);
+    });
+  });
+
+  test('failed if http status code is not 200', () async {
+    when(() => client.get(any())).thenAnswer((_) async => failureResponse);
+
+    final result = await repository.fetch(filter: filter);
+
+    expect(result.hasException, isTrue);
+    expect(result.exception, isResultException);
+  });
+
+  test('failed if response contains an error', () async {
+    when(() => client.get(any())).thenAnswer((_) async => errorResponse);
+
+    final result = await repository.fetch(filter: filter);
+
+    expect(result.hasException, isTrue);
+    expect(result.exception, isResultException);
+  });
+
+  test('failed if client thrown an exception', () async {
+    when(() => client.get(any())).thenThrow(exception);
+
+    final result = await repository.fetch(filter: filter);
+
+    expect(result.hasException, isTrue);
+    expect(result.exception, isResultException);
+    expect(result.exception.sourceException, exception);
+  });
+}
